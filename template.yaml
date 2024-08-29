@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  aws_bonanza_core
+
+Parameters:
+  DBSecretName:
+    Type: String
+    Description: Name of the database
+
+  DBUsername:
+    Type: String
+    Description: Name of the db user
+
+Globals:
+  Function:
+    Timeout: 900
+    Handler: app.lambda_handler
+    Runtime: python3.8
+    MemorySize: 1024
+    Architectures:
+      - x86_64
+  Api:
+    Cors:
+      AllowMethods: "'OPTIONS,DELETE,PUT,POST'"
+      AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'*'"
+
+Resources:
+  # RDS Instance
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      DBName: bonanza_core
+      Engine: postgres
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecretName}:SecretString:password}}"
+      MultiAZ: False
+      PubliclyAccessible: True
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      EnableIAMDatabaseAuthentication: True
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable access to RDS
+      VpcId: vpc-0fa085959b86b6757
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0  # Altera isso para um intervalo de IPs mais restrito, se necessário
+
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB Instance
+      SubnetIds: 
+        - subnet-045ee7ea621d02c34
+        - subnet-0a62961c04f2048b4
+        - subnet-059cfc33ea93f60cf
+        - subnet-0a0d8d6b2660d8e60
+        - subnet-06aa872c7b94fa612
+        - subnet-03846faaf834448fb
+
+  # Secrets Manager Secret for RDS Password
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref DBSecretName
+      Description: "Secret para a senha do banco de dados PostgreSQL"
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBUsername}"}'
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: "\"@/\\"
+  
+  # S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: bonanza-core
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:*
+                  - secretsmanager:GetSecretValue
+                  - logs:*
+                  - s3:*
+                Resource: "*"
+
+
+  ProcessShapefile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: processar_area_core
+      CodeUri: lambdas/processar_area/
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: 
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: 
+                - arn:aws:s3:::bonanza-gis
+                - arn:aws:s3:::bonanza-gis/*
+      Events:
+        S3PutEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref S3Bucket
+            Events: s3:ObjectCreated:Put
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: area/   
+
