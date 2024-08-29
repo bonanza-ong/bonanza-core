@@ -28,7 +28,7 @@ Globals:
 
 Resources:
   # RDS Instance
-  RDSInstance:
+  RDSCoreInstance:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceClass: db.t3.micro
@@ -41,11 +41,11 @@ Resources:
       PubliclyAccessible: True
       StorageType: gp2
       VPCSecurityGroups:
-        - !GetAtt RDSSecurityGroup.GroupId
-      DBSubnetGroupName: !Ref DBSubnetGroup
+        - !GetAtt RDSCoreSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBCoreSubnetGroup
       EnableIAMDatabaseAuthentication: True
 
-  RDSSecurityGroup:
+  RDSCoreSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable access to RDS
@@ -57,7 +57,7 @@ Resources:
           CidrIp: 0.0.0.0/0  # Altera isso para um intervalo de IPs mais restrito, se necessário
 
 
-  DBSubnetGroup:
+  DBCoreSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Subnets available for the RDS DB Instance
@@ -70,7 +70,7 @@ Resources:
         - subnet-03846faaf834448fb
 
   # Secrets Manager Secret for RDS Password
-  RDSSecret:
+  RDSCoreSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Ref DBSecretName
@@ -81,60 +81,3 @@ Resources:
         PasswordLength: 16
         ExcludeCharacters: "\"@/\\"
   
-  # S3 Bucket
-  S3Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: bonanza-core
-
-  # Lambda Execution Role
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: LambdaExecutionPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - rds:*
-                  - secretsmanager:GetSecretValue
-                  - logs:*
-                  - s3:*
-                Resource: "*"
-
-
-  ProcessShapefile:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: processar_area_core
-      CodeUri: lambdas/processar_area/
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: 
-                - s3:GetObject
-                - s3:ListBucket
-              Resource: 
-                - arn:aws:s3:::bonanza-gis
-                - arn:aws:s3:::bonanza-gis/*
-      Events:
-        S3PutEvent:
-          Type: S3
-          Properties:
-            Bucket: !Ref S3Bucket
-            Events: s3:ObjectCreated:Put
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: area/   
-
